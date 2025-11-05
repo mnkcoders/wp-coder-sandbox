@@ -18,13 +18,16 @@ class CoderSandbox {
     /**
      * @var \CoderSandbox
      */
-    private static $instance = null;
+    private static $_instance = null;
 
     /**
      * @var String[]
      */
     private $_boxes = array();
 
+    /**
+     * 
+     */
     private function __construct() {
         
     }
@@ -43,7 +46,7 @@ class CoderSandbox {
      */
     public function save(\CoderBox $box = null){
         if($box){
-            $path = $box->container(true);
+            $path = $box->local();
             if (!file_exists($path)) {
                 wp_mkdir_p($path);
             }
@@ -121,11 +124,11 @@ class CoderSandbox {
     /**
      * @return \CoderSandbox
      */
-    public static function init() {
-        if (self::$instance === null) {
-            self::$instance = new self();
+    public static function instance() {
+        if (self::$_instance === null) {
+            self::$_instance = new self();
         }
-        return self::$instance;
+        return self::$_instance;
     }
 }
 
@@ -194,6 +197,12 @@ class CoderBox {
         return $fullpath ? self::uploads($this->name) : $this->name;
     }
     /**
+     * @return string
+     */
+    public function local( ){
+        return self::uploads($this->name,true);
+    }
+    /**
      * @return String
      */
     public function title(){
@@ -210,7 +219,7 @@ class CoderBox {
      * @return String
      */
     public function endpoint( $fullpath = false ){
-        return $fullpath ? $this->container(true) . $this->endpoint : $this->endpoint;
+        return $fullpath ? $this->local(true) . $this->endpoint : $this->endpoint;
     }
     /**
      * @return bool
@@ -236,12 +245,13 @@ class CoderBox {
     }
     /**
      * @param String $container
+     * @param bool $getdir
      * @return String
      */
-    static function uploads( $container = '' ){
+    static function uploads( $container = '' ,$getdir = false){
         $upload_dir = wp_upload_dir();
-        return sprintf('%s/sandbox/%s',
-                trailingslashit($upload_dir['baseurl']),
+        return sprintf('%ssandbox/%s',
+                trailingslashit( $getdir ? $upload_dir['basedir'] : $upload_dir['baseurl']),
                 !empty($container) ? $container . '/' : '');
     }
     /**
@@ -258,61 +268,12 @@ class CoderBox {
     }
 }
 
-/**
- * 
- */
-class CoderSandboxAdmin {
-
-    /**
-     * @var String
-     */
-    private $_context = '';
-
-    /**
-     * 
-     * @param String $context
-     */
-    private function __construct($context = '') {
-        $this->_context = $context;
-    }
-    
-    
-    
-    
-    /**
-     * @return String[]
-     */
-    static function input() {
-        return array_merge(
-                filter_input_array(INPUT_GET, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: [],
-                filter_input_array(INPUT_POST, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: []
-        );
-    }
-
-    /**
-     * @param String $context
-     */
-    static function run($context = '') {
-        return new CoderSandboxAdmin($context);
-    }
-}
-
 // Bootstrap plugin
-add_action('plugins_loaded', function () { CoderSandbox::init(); });
+add_action('plugins_loaded', function () { CoderSandbox::instance(); });
 
 add_action('init', function () {
     if (is_admin()) {
-        add_action('admin_menu', function () {
-            add_menu_page(
-                    __('Coder Sandbox', 'coder_sandbox'),
-                    __('Sandbox', 'coder_sandbox'),
-                    'manage_options',
-                    'coder-sandbox',
-                    function () {
-                        CoderSandboxAdmin::run();
-                    }, 'dashicons-screenoptions', 40
-            );
-        });
+        require CODER_SANDBOX_DIR . 'admin.php';
     } else {
         CoderSandbox::rewrite();
     }
