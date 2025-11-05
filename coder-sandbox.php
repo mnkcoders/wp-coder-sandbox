@@ -222,19 +222,42 @@ class CoderBox {
         return $fullpath ? $this->local(true) . $this->endpoint : $this->endpoint;
     }
     /**
+     * @param string $content
+     * @return string
+     */
+    private function parse( $content , $base_url = '') {
+        
+        // Replace src, href, and data-* attributes that start with ./ or without http
+        $patterns = [
+            '/(src|href)=["\'](?!https?:\/\/|\/\/|data:|#)([^"\']+)["\']/i'
+        ];
+
+        $content = preg_replace_callback($patterns, function ($matches) use ($base_url) {
+            $attr = $matches[1];
+            $url = ltrim($matches[2], '/');
+            $new_url = trailingslashit($base_url) . $url;
+            return sprintf('%s="%s"', $attr, esc_url($new_url));
+        }, $content);
+        
+        $content .= sprintf('<!-- LOADED ON %s -->', date('Y-m-d H:i:s'));
+
+        return $content;
+    }
+
+    /**
      * @return bool
      */
     public function run() {
         $route = $this->endpoint(true);
         if (file_exists($route)) {
-            $type = explode('.', strtolower( $this->endpoint()) );
-            if($type[count($type)-1] === 'php'){
+            $type = strtolower(pathinfo($route, PATHINFO_EXTENSION));
+            if($type === 'php'){
                 require $route;
             }
             else{
                 $content = file_get_contents($route);
                 // Optionally inject dynamic data or user tier validation
-                echo $content;
+                echo $this->parse( $content , $this->container(true) );
             }
             return true;
         }
