@@ -1,4 +1,6 @@
-<?php defined('ABSPATH') or exit;
+<?php namespace CODERS\SandBox;
+
+defined('ABSPATH') or exit;
 
 add_action('admin_menu', function () {
     add_menu_page(
@@ -7,16 +9,123 @@ add_action('admin_menu', function () {
             'manage_options',
             'coder-sandbox',
             function () {
-                CoderBoxController::run();
+                \CODERS\SandBox\Controller::run();
             }, 'dashicons-screenoptions', 40
     );
 });
+
+add_action('admin_post_sandbox', function () {
+    
+    \CODERS\SandBox\Controller::run(filter_input(INPUT_GET, 'action') ?? 'default');
+    
+    return;
+    
+    $id = filter_input(INPUT_GET, 'id') ?? '';
+
+    if (!$id) {
+        wp_die('Invalid sandbox ID.');
+    }
+
+    // Build URL to plugin settings page with parameters
+    $url = add_query_arg(
+        [
+            'page'   => 'coder-sandbox',
+            'action' => 'sandbox',
+            'id'     => $id
+        ],
+        admin_url('admin.php')
+    );
+
+    wp_redirect($url);
+    exit;
+});
+
+
+interface Content{
+    public function get($name = '') : string;
+    public function list($name = '') : array;
+    public function is($name = '') : bool;
+    public function has($name = '') : bool;
+    public function content() : array;
+}
+
+/**
+ * 
+ */
+class SandboxContent extends \CoderBox implements Content{
+    /**
+     * @param string $name
+     * @param string $endpoint
+     */
+    public function __construct($name = '' , $endpoint = '') {
+        parent::__construct($name, $endpoint);
+    }
+    /**
+     * @param \CoderBox $box
+     * @return \CODERS\SandBox\SandboxContent
+     */
+    public static function create( \CoderBox $box = null ){
+        if( !is_null($box) && get_class($box) === \CoderBox::class){
+
+            $content = new SandboxContent($box->name, $box->endpoint);
+            $content->populate($box->content());
+            return $content;
+        }
+        return null;
+    }
+            
+    /**
+     * @return \CoderSandbox
+     */
+    public static final function Sandbox(){
+        
+        return \CoderSandbox::instance();
+        
+    }
+    /**
+     * @return array
+     */
+    public function content() : array {
+        return $this->data();
+    }
+    /**
+     * @param string $get
+     * @return string
+     */
+    public function get($get = ''): string {
+        return $this->$get;
+    }
+    /**
+     * @param string $has
+     * @return bool
+     */
+    public function has($has = ''): bool {
+        $call = sprintf('has%s', ucfirst($has));
+        return method_exists($this, $call) ? $this->$call() : array_key_exists($has, $this->content());
+    }
+    /**
+     * @param string $is
+     * @return bool
+     */
+    public function is($is = ''): bool {
+        $call = sprintf('is%s', ucfirst($is));
+        return method_exists($this, $call) ? $this->$call() : false;
+    }
+    /**
+     * @param string $list
+     * @return array
+     */
+    public function list($list = ''): array {
+        $call = sprintf('list%s', ucfirst($list));
+        return method_exists($this, $call) ?  $this->$call() : array();
+    }
+}
 
 
 /**
  * 
  */
-class CoderBoxController {
+class Controller {
 
     /**
      * @var String
@@ -36,10 +145,10 @@ class CoderBoxController {
     }
     /**
      * @param string $context
-     * @return \CoderBoxController
+     * @return \Controller
      */
     public static function create( $context = 'default'){
-        return new CoderBoxController($context);
+        return new Controller($context);
     }
     
     /**
@@ -51,7 +160,7 @@ class CoderBoxController {
     /**
      * @param String $content
      * @param String $type
-     * @return \CoderBoxController
+     * @return \Controller
      */
     protected function notify($content = '' , $type = 'info' ) {
         $this->_mailbox[] = array('content'=>$content,'type'=>$type);
@@ -77,11 +186,11 @@ class CoderBoxController {
     }
     /**
      * @param string $action
-     * @return \CoderBoxController
+     * @return \Controller
      */
     protected function error( $action = '' ){
         $this->notify(sprintf('Invaild action %s',$action));
-        CoderBoxView::create('error')->render();
+        View::create('error')->render();
         return $this;
     }
     /**
@@ -100,7 +209,7 @@ class CoderBoxController {
         
         $this->notify('Default message');
         
-        CoderBoxView::create()
+        View::create()
                 //->setContent($content)
                 ->viewMessages($this->mailbox())
                 ->view();
@@ -126,21 +235,21 @@ class CoderBoxController {
      * @param String $context
      */
     static function run($context = 'default' ) {
-        CoderBoxController::create()->action($context);
+        Controller::create()->action($context);
     }
 }
 
 
-class CoderBoxMainController extends CoderBoxController{
+class MainController extends Controller{
     
 }
 
-class CoderBoxContainerController extends CoderBoxController{
+class BoxController extends Controller{
     
     
 }
 
-class CoderBoxSettingsController extends CoderBoxController{
+class SettingsController extends Controller{
     
 }
 
@@ -151,7 +260,7 @@ class CoderBoxSettingsController extends CoderBoxController{
 /**
  * 
  */
-class CoderBoxView{
+class View{
     /**
      * @var \CoderBox
      */
@@ -169,14 +278,14 @@ class CoderBoxView{
     }
     /**
      * @param string $context
-     * @return \CoderBoxView
+     * @return \View
      */
     static public function create($context = 'default') {
-        return new CoderBoxView($context);
+        return new View($context);
     }
     /**
      * @param \CoderBox $content
-     * @return \CoderBoxView Description
+     * @return \View Description
      */
     public function setContent(\CoderBox $content = null ){
         $this->_content = $content;
@@ -195,7 +304,10 @@ class CoderBoxView{
      * @return mixed
      */
     public function __call(string $name, array $arguments) {
+        $arguments = is_array($arguments) ? $arguments : array();
         switch(true){
+            case preg_match('/^get_/', $name):
+                return $this->get(substr($name, 5));
             case preg_match('/^list_/', $name):
                 return $this->__list(substr($name, 5));
             case preg_match('/^is_/', $name):
@@ -205,7 +317,13 @@ class CoderBoxView{
             case preg_match('/^show_/', $name):
                 return $this->__show(substr($name, 5));
             case preg_match('/^action_/', $name):
-                return $this->__action(substr($name, 7),$arguments[0] ?? array());
+                return $this->action(substr($name, 7),
+                    isset($arguments[0]) ? $arguments[0]: array());
+            case preg_match('/^url/', $name):
+                return $this->link(
+                    substr($name, 4),
+                    isset($arguments[0]) ? $arguments[0] : array() ,
+                    isset($arguments[1]) ? $arguments[1] : array() );
         }
         return $this->get($name);
     }
@@ -219,14 +337,46 @@ class CoderBoxView{
     /**
      * @param string $path
      * @param array $args
+     * @param array $nodes
      * @return string
      */
-    protected function link( $path = '' , array $args = array()){
+    protected function link( $path = '' , array $args = array() , array $nodes = array()){
         $get = array();
         foreach( $args as $var => $val ){
             $get[] = sprintf('%s=%s',$var,$val);
         }
-        return sprintf('#%s%s',$path, count($get) ? '?' . implode('&', $get) : '');
+        if(count($nodes)){
+            $path .=  '/' . implode('/', $nodes);
+        }
+        $base_url = site_url($path);
+        if( count( $get )){
+            $base_url .=  '?' . implode('&', $get);
+        }
+        return $base_url;
+    }
+    /**
+     * @param array $args
+     * @return string|url
+     */
+    protected function adminlink( array $args = array()){
+        //$admin_url = menu_page_url('coder-sandbox');
+        $admin_url = admin_url('admin.php?page=coder-sandbox');
+        $get = array();
+        foreach ($args as $var => $val ){
+            $get[] = $var . '=' . $val;
+        }
+        return count($args) ? $admin_url . '&' . implode('&', $get) : $admin_url;
+    }
+    /**
+     * @param string $action
+     * @param array $args
+     * @return string
+     */
+    protected function action( $action = '' , array $args = array()){
+        if(strlen($action)){
+            $args['action'] = $action;
+        }
+        return $this->adminlink($args);
     }
     /**
      * @param string $name
@@ -240,7 +390,8 @@ class CoderBoxView{
      * @return string
      */
     protected function get($name) {
-        return $this->hasContent() ? $this->content()->$name : '';
+        $call = sprintf('get%', ucfirst($name));
+        return  method_exists($this, $call) ? $this->$call() : $this->content()->$name;
     }
     /**
      * @param string $view
@@ -258,7 +409,7 @@ class CoderBoxView{
     }
     /**
      * @param array $messages
-     * @return \CoderBoxView
+     * @return \View
      */
     public function viewMessages( array $messages = array() ){
         foreach( $messages as $message ){
@@ -272,7 +423,7 @@ class CoderBoxView{
      * @return string
      */
     protected function __action($action = '' , $args = array() ) {
-        return $this->link($action, is_array($args) ? $args : array());
+        return $this->action($action, is_array($args) ? $args : array());
     }
     /**
      * @param string $show
@@ -315,21 +466,21 @@ class CoderBoxView{
      * @return \CoderBox[]
      */
     protected function listBoxes() {
-        return CoderSandbox::instance()->list();
+        return SandboxContent::Sandbox()->list();
     }
 }
 
 
-class CoderBoxMainView extends CoderBoxView{
+class MainView extends View{
     
 }
 
-class CoderBoxContainerView extends CoderBoxView{
+class BoxView extends View{
     
     
 }
 
-class CoderBoxSettingsView extends CoderBoxView{
+class SettingsView extends View{
     
 }
 

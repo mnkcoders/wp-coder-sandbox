@@ -9,6 +9,7 @@ defined('ABSPATH') or exit;
  * Text Domain: coder_sandbox
  */
 define('CODER_SANDBOX_DIR', plugin_dir_path(__FILE__));
+define('CODER_SANDBOX_URL', plugin_dir_url(__FILE__));
 
 /**
  * 
@@ -155,10 +156,16 @@ class CoderBox {
         //$this->_id = md5($this->name . $this->created);
     }
     /**
+     * @return array
+     */
+    protected function data(){
+        return $this->_content;
+    }
+    /**
      * @param array $input
      * @return \CoderBox
      */
-    private function populate( array $input  = array() ) {
+    protected function populate( array $input  = array() ) {
         foreach($input as $var => $val ){
             $this->_content[$var ] = $val;
         }
@@ -219,29 +226,36 @@ class CoderBox {
      * @return String
      */
     public function endpoint( $fullpath = false ){
-        return $fullpath ? $this->local(true) . $this->endpoint : $this->endpoint;
+        return $fullpath ? $this->local() . $this->endpoint : $this->endpoint;
     }
     /**
      * @param string $content
+     * @param string $baseurl
+     * @param bool $attachclient
      * @return string
      */
-    private function parse( $content , $base_url = '') {
+    private function parse( $content = '' , $baseurl = '' , $attachclient = false ) {
         
         // Replace src, href, and data-* attributes that start with ./ or without http
         $patterns = [
             '/(src|href)=["\'](?!https?:\/\/|\/\/|data:|#)([^"\']+)["\']/i'
         ];
 
-        $content = preg_replace_callback($patterns, function ($matches) use ($base_url) {
+        $parsed = preg_replace_callback($patterns, function ($matches) use ($baseurl) {
             $attr = $matches[1];
             $url = ltrim($matches[2], '/');
-            $new_url = trailingslashit($base_url) . $url;
+            $new_url = trailingslashit($baseurl) . $url;
             return sprintf('%s="%s"', $attr, esc_url($new_url));
         }, $content);
-        
-        $content .= sprintf('<!-- LOADED ON %s -->', date('Y-m-d H:i:s'));
 
-        return $content;
+        if ($attachclient) {
+            $client = sprintf('<script type="text/javascript" src="%s/sandbox/client.js"></script>',
+                    CODER_SANDBOX_URL);
+            $parsed = preg_replace("/\<\/body\>/", sprintf('%s</body>',$client), $parsed);
+        }
+        $parsed .= sprintf('<!-- LOADED ON %s -->', date('Y-m-d H:i:s'));
+
+        return $parsed;
     }
 
     /**
@@ -250,6 +264,8 @@ class CoderBox {
     public function run() {
         $route = $this->endpoint(true);
         if (file_exists($route)) {
+            //load sandbox client script wrapper
+            $client = true;
             $type = strtolower(pathinfo($route, PATHINFO_EXTENSION));
             if($type === 'php'){
                 require $route;
@@ -257,12 +273,14 @@ class CoderBox {
             else{
                 $content = file_get_contents($route);
                 // Optionally inject dynamic data or user tier validation
-                echo $this->parse( $content , $this->container(true) );
+                echo $this->parse( $content , $this->container(true) , $client );
             }
             return true;
         }
         else {
-            wp_die(__('Sandbox application not found', 'coder_sandbox') . ' :: ' . $this->container());
+            wp_die( sprintf('<p>%s: <strong>%s</strong></p>',
+                    __('Sandbox application not found', 'coder_sandbox'),
+                    $this->container()));
         }
         return false;
     }
@@ -290,6 +308,9 @@ class CoderBox {
         return null;
     }
 }
+
+
+
 
 // Bootstrap plugin
 add_action('plugins_loaded', function () { CoderSandbox::instance(); });

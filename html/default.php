@@ -15,14 +15,14 @@
         <?php foreach ($this->list_boxes() as $box) : ?>
             <tr>
                 <td><a href="<?php
-                    print $this->action_box(array('id'=>$box->id)) ?>" target="_self"><?php
+                    print $this->action_sandbox(array('id'=>$box->id)) ?>" target="_self"><?php
                     print $box->name ?></a>
                 </td>
                 <td><?php print $box->title ?></td>
                 <td><?php print $box->endpoint ?></td>
                 <td><?php print $box->tier ?></td>
                 <td><a class="button" href="<?php
-                        print $this->action_run(array('id'=>$box->id)) ?>" target="_blank"><?php
+                        print $this->url_sandbox(array(),array($box->name)) ?>" target="_blank"><?php
                         print __('Open','coder_sandbox') ?></a>
                 </td>
                 <td><?php print $box->created ?></td>
