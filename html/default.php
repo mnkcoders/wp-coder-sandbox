@@ -22,7 +22,7 @@
                 <td><?php print $box->endpoint ?></td>
                 <td><?php print $box->tier ?></td>
                 <td><a class="button" href="<?php
-                        print $this->url_sandbox(array(),array($box->name)) ?>" target="_blank"><?php
+                        print $this->link_sandbox(array($box->name)) ?>" target="_blank"><?php
                         print __('Open','coder_sandbox') ?></a>
                 </td>
                 <td><?php print $box->created ?></td>

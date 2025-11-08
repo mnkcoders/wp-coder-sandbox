@@ -16,9 +16,7 @@ add_action('admin_menu', function () {
 
 add_action('admin_post_sandbox', function () {
     
-    \CODERS\SandBox\Controller::run(filter_input(INPUT_GET, 'action') ?? 'default');
-    
-    return;
+    return \CODERS\SandBox\Controller::run(filter_input(INPUT_GET, 'action') ?? 'default');
     
     $id = filter_input(INPUT_GET, 'id') ?? '';
 
@@ -235,6 +233,12 @@ class Controller {
      * @param String $context
      */
     static function run($context = 'default' ) {
+        
+        $input = Controller::input();
+        if(array_key_exists('id', $input) && $context === 'default'){
+            $context = 'sandbox';
+        }
+        
         Controller::create()->action($context);
     }
 }
@@ -300,11 +304,11 @@ class View{
     
     /**
      * @param string $name
-     * @param array $arguments
+     * @param array $args
      * @return mixed
      */
     public function __call(string $name, array $arguments) {
-        $arguments = is_array($arguments) ? $arguments : array();
+        $args = is_array($arguments) ? $arguments : array();
         switch(true){
             case preg_match('/^get_/', $name):
                 return $this->get(substr($name, 5));
@@ -317,14 +321,18 @@ class View{
             case preg_match('/^show_/', $name):
                 return $this->__show(substr($name, 5));
             case preg_match('/^action_/', $name):
-                return $this->action(substr($name, 7),
-                    isset($arguments[0]) ? $arguments[0]: array());
-            case preg_match('/^url/', $name):
+                return $this->action(
+                        substr($name, 7),
+                        isset($args[0]) ? $args[0]: array());
+            case preg_match('/^link/', $name):
                 return $this->link(
-                    substr($name, 4),
-                    isset($arguments[0]) ? $arguments[0] : array() ,
-                    isset($arguments[1]) ? $arguments[1] : array() );
-        }
+                        substr($name, 5),
+                        isset($args[0]) ? $args[0] : array());
+            case preg_match('/^url/', $name):
+                return $this->url(
+                    explode( '_', substr($name, 4)),
+                    isset($args[0]) ? $args[0] : array() );
+                }
         return $this->get($name);
     }
     /**
@@ -335,30 +343,40 @@ class View{
         return $this->$name();
     }
     /**
-     * @param string $path
+     * 
+     * @param string $link
      * @param array $args
-     * @param array $nodes
+     * @return string|url
+     */
+    protected function link($link = '', array $args = array()) {
+        $call = sprintf('link%s', ucfirst($link));
+        return method_exists($this, $call) ? $this->$call($args) : $this->url($link,$args);
+    }
+    /**
+     * @param array $path
+     * @param array $args
      * @return string
      */
-    protected function link( $path = '' , array $args = array() , array $nodes = array()){
+    private function url( $path = array() , array $args = array() ){
+        $base_url = site_url( count($path) ? implode('/', $path) : '' );
+
         $get = array();
+
         foreach( $args as $var => $val ){
             $get[] = sprintf('%s=%s',$var,$val);
         }
-        if(count($nodes)){
-            $path .=  '/' . implode('/', $nodes);
-        }
-        $base_url = site_url($path);
+
         if( count( $get )){
             $base_url .=  '?' . implode('&', $get);
         }
+
         return $base_url;
     }
     /**
      * @param array $args
      * @return string|url
      */
-    protected function adminlink( array $args = array()){
+    private function adminurl( array $args = array()){
         //$admin_url = menu_page_url('coder-sandbox');
         $admin_url = admin_url('admin.php?page=coder-sandbox');
         $get = array();
@@ -373,10 +391,14 @@ class View{
      * @return string
      */
     protected function action( $action = '' , array $args = array()){
+        $call = sprintf('action%s', ucfirst($action));
+        if(method_exists($this, $call)){
+            return $this->$call();
+        }
         if(strlen($action)){
             $args['action'] = $action;
         }
-        return $this->adminlink($args);
+        return $this->adminurl($args);
     }
     /**
      * @param string $name
@@ -390,8 +412,11 @@ class View{
      * @return string
      */
     protected function get($name) {
-        $call = sprintf('get%', ucfirst($name));
-        return  method_exists($this, $call) ? $this->$call() : $this->content()->$name;
+        $call = sprintf('get%s', ucfirst($name));
+        if(method_exists($this, $call)){
+            return $this->$call();
+        }
+        return $this->hasContent() ? $this->content()->$name : '';
     }
     /**
      * @param string $view
@@ -467,6 +492,17 @@ class View{
      */
     protected function listBoxes() {
         return SandboxContent::Sandbox()->list();
+    }
+    /**
+     * @param array $args
+     * @return string
+     */
+    protected function linkSandbox( array $args = array()){
+        $path = array('sandbox');
+        if( count($args)){
+            $path = array_merge($path,$args);
+        }
+        return $this->url($path);
     }
 }
 
