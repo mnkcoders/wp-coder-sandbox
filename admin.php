@@ -12,11 +12,22 @@ add_action('admin_menu', function () {
                 \CODERS\SandBox\Controller::run();
             }, 'dashicons-screenoptions', 40
     );
+    add_submenu_page(
+            'coder-sandbox', // parent slug (must match main menu)
+            __('Sandbox Settings', 'coder_sandbox'),
+            __('Settings', 'coder_sandbox'),
+            'manage_options',
+            'coder-sandbox-settings', // submenu slug
+            function () {
+                \CODERS\SandBox\Controller::run('settings');
+            }
+    );
 });
 
 add_action('admin_post_sandbox', function () {
     
-    return \CODERS\SandBox\Controller::run(filter_input(INPUT_GET, 'action') ?? 'default');
+    
+    return \CODERS\SandBox\Controller::run(filter_input(INPUT_GET, 'context') ?? 'main');
     
     $id = filter_input(INPUT_GET, 'id') ?? '';
 
@@ -39,7 +50,7 @@ add_action('admin_post_sandbox', function () {
 });
 
 
-interface Content{
+interface ContentProvider{
     public function get($name = '') : string;
     public function list($name = '') : array;
     public function is($name = '') : bool;
@@ -50,7 +61,7 @@ interface Content{
 /**
  * 
  */
-class SandboxContent extends \CoderBox implements Content{
+class SandboxContent extends \CoderBox implements ContentProvider{
     /**
      * @param string $name
      * @param string $endpoint
@@ -66,7 +77,7 @@ class SandboxContent extends \CoderBox implements Content{
         if( !is_null($box) && get_class($box) === \CoderBox::class){
 
             $content = new SandboxContent($box->name, $box->endpoint);
-            $content->populate($box->content());
+            $content->populate($box->data());
             return $content;
         }
         return null;
@@ -117,36 +128,85 @@ class SandboxContent extends \CoderBox implements Content{
         $call = sprintf('list%s', ucfirst($list));
         return method_exists($this, $call) ?  $this->$call() : array();
     }
+    /**
+     * @return \CoderBox[]
+     */
+    static public function listBoxes() {
+        return self::Sandbox()->list();
+    }
+    /**
+     * @param string $id
+     * @return \CoderBox
+     */
+    public static function import( $id = '' ) {
+        foreach (self::listBoxes() as $box ){
+            if( $box->id === $id ){
+                return self::create($box);
+            }
+        }
+        return null;
+    }
 }
-
-
 /**
  * 
  */
-class Controller {
+class SettingsContent implements ContentProvider{
+    
+    function __construct() {
+        
+    }
+
+
+    public function content(): array {
+        return array();
+    }
+
+    public function get($name = ''): string {
+        
+        return '';
+    }
+
+    public function has($name = ''): bool {
+        return false;
+    }
+
+    public function is($name = ''): bool {
+        return false;
+    }
+
+    public function list($name = ''): array {
+        return array();
+    }
+}
+/**
+ * 
+ */
+abstract class Controller {
 
     /**
      * @var String
      */
-    private $_context = '';
+    //private $_context = '';
     /**
      * @var array
      */
-    private $_mailbox = array();
+    private static $_mailbox = array();
 
     /**
      * 
      * @param String $context
      */
-    private function __construct($context = '') {
-        $this->_context = $context;
+    protected function __construct( ) {
+        //$this->_context = $context;
     }
     /**
      * @param string $context
      * @return \Controller
      */
-    public static function create( $context = 'default'){
-        return new Controller($context);
+    public static function create( $context = 'main'){
+        
+        $class = sprintf('\CODERS\SandBox\%sController', ucfirst($context));
+        return class_exists($class) ? new $class( ) : new ErrorController();
     }
     
     /**
@@ -158,25 +218,23 @@ class Controller {
     /**
      * @param String $content
      * @param String $type
-     * @return \Controller
      */
-    protected function notify($content = '' , $type = 'info' ) {
-        $this->_mailbox[] = array('content'=>$content,'type'=>$type);
-        return $this;
+    protected static function notify($content = '' , $type = 'info' ) {
+        Controller::$_mailbox[] = array('content'=>$content,'type'=>$type);
     }
     
     /**
      * @return array
      */
-    private function mailbox(){
-        return $this->_mailbox;
+    public static function mailbox(){
+        return Controller::$_mailbox;
     }
     /**
      * @param String $action
      * @return bool
      */
-    public function action( $action = '' ){
-        $command = sprintf('%s_action', $action ?? $this->context() );
+    public function action( $action = 'default' ){
+        $command = sprintf('%sAction', $action ?? $this->context() );
         if(method_exists($this, $command)){
             return $this->$command(self::input());
         }
@@ -187,7 +245,7 @@ class Controller {
      * @return \Controller
      */
     protected function error( $action = '' ){
-        $this->notify(sprintf('Invaild action %s',$action));
+        self::notify(sprintf('Invaild action %s',$action));
         View::create('error')->render();
         return $this;
     }
@@ -195,29 +253,7 @@ class Controller {
      * @param array $input
      * @return bool
      */
-    private function error_action( array $input = array() ){
-        $this->error($this->context());
-        return false;
-    }
-    /**
-     * @param array $input
-     * @return bool
-     */
-    protected function default_action( array $input = array() ){
-        
-        $this->notify('Default message');
-        
-        View::create()
-                //->setContent($content)
-                ->viewMessages($this->mailbox())
-                ->view();
-        
-        return true;
-    }
-    
-    
-    
-    
+    abstract protected function defaultAction( array $input = array() );    
     
     /**
      * @return String[]
@@ -231,30 +267,82 @@ class Controller {
 
     /**
      * @param String $context
+     * @return bool
      */
-    static function run($context = 'default' ) {
-        
-        $input = Controller::input();
-        if(array_key_exists('id', $input) && $context === 'default'){
+    static function run($context = 'main' ) {
+        $id = filter_input(INPUT_GET, 'id') ?? '';
+        $action = filter_input(INPUT_GET, 'action') ?? 'default';
+        if(strlen($id) && $context === 'main'){
             $context = 'sandbox';
         }
-        
-        Controller::create()->action($context);
+        $controller =  Controller::create( $context );
+        return !is_null($controller) ? $controller->action($action) ?? false : false;
     }
 }
 
+class ErrorController extends Controller{
+    /**
+     * @param array $input
+     * @return bool
+     */
+    protected function defaultAction(array $input = []): bool {
+        $this->error();
+        return false;
+    }
+}
 
+/**
+ * 
+ */
 class MainController extends Controller{
     
+    /**
+     * @param array $input
+     * @return bool
+     */
+    protected function defaultAction( array $input = array() ){
+        
+        //$this->notify('Default message');
+        
+        View::create()
+                //->setContent($content)
+                ->view('list');
+        
+        return true;
+    }
 }
-
-class BoxController extends Controller{
+/**
+ * 
+ */
+class SandboxController extends Controller{
     
-    
+    /**
+     * @param array $input
+     * @return bool
+     */
+    protected function defaultAction(array $input = []): bool {
+        
+        $id = array_key_exists('id', $input) ? $input['id'] : '';
+        $box = SandboxContent::import($id);
+        View::create('sandbox')->setContent($box)->view('box');
+        return true;
+    }
 }
-
+/**
+ * 
+ */
 class SettingsController extends Controller{
-    
+    /**
+     * 
+     * @param array $input
+     * @return bool
+     */
+    protected function defaultAction(array $input = []): bool {
+
+        View::create('settings')->setContent(new SettingsContent())->view('settings');
+
+        return true;
+    }
 }
 
 
@@ -266,7 +354,7 @@ class SettingsController extends Controller{
  */
 class View{
     /**
-     * @var \CoderBox
+     * @var ContentProvider
      */
     private $_content = null;
     /**
@@ -288,15 +376,15 @@ class View{
         return new View($context);
     }
     /**
-     * @param \CoderBox $content
+     * @param ContentProvider $content
      * @return \View Description
      */
-    public function setContent(\CoderBox $content = null ){
+    public function setContent(ContentProvider $content = null ){
         $this->_content = $content;
         return $this;
     }
     /**
-     * @return \CoderBox
+     * @return ContentProvider
      */
     protected function content(){
         return $this->_content;
@@ -393,7 +481,7 @@ class View{
     protected function action( $action = '' , array $args = array()){
         $call = sprintf('action%s', ucfirst($action));
         if(method_exists($this, $call)){
-            return $this->$call();
+            return $this->$call($args);
         }
         if(strlen($action)){
             $args['action'] = $action;
@@ -423,6 +511,7 @@ class View{
      * @return bool
      */
     public function view($view = ''){
+        $this->viewMessages(Controller::mailbox() );
         $path = $this->path(sprintf('%s.php', strlen($view) ? $view : $this->_context));
         if(file_exists($path)){
             require $path;
@@ -436,7 +525,7 @@ class View{
      * @param array $messages
      * @return \View
      */
-    public function viewMessages( array $messages = array() ){
+    protected function viewMessages( array $messages = array() ){
         foreach( $messages as $message ){
             printf('<div class="notice is-dismissible %s">%s</div>',$message['type'],$message['content']);
         }
@@ -504,21 +593,16 @@ class View{
         }
         return $this->url($path);
     }
+    /**
+     * @param string $id
+     * @return string|url
+     */
+    protected function actionSandbox( array $args = array() ) {
+        $args['context'] = 'sandbox';
+        return $this->adminurl($args);
+    }
 }
 
-
-class MainView extends View{
-    
-}
-
-class BoxView extends View{
-    
-    
-}
-
-class SettingsView extends View{
-    
-}
 
 
 
