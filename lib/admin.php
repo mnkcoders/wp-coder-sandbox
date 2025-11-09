@@ -1,4 +1,4 @@
-<?php namespace CODERS\SandBox;
+<?php namespace CODERS\Sandbox;
 
 defined('ABSPATH') or exit;
 
@@ -9,7 +9,7 @@ add_action('admin_menu', function () {
             'manage_options',
             'coder-sandbox',
             function () {
-                \CODERS\SandBox\Controller::run();
+                \CODERS\Sandbox\Controller::run(filter_input(INPUT_GET, 'context') ?? 'main');
             }, 'dashicons-screenoptions', 40
     );
     add_submenu_page(
@@ -19,35 +19,15 @@ add_action('admin_menu', function () {
             'manage_options',
             'coder-sandbox-settings', // submenu slug
             function () {
-                \CODERS\SandBox\Controller::run('settings');
+                \CODERS\Sandbox\Controller::run('settings');
             }
     );
 });
 
 add_action('admin_post_sandbox', function () {
-    
-    
-    return \CODERS\SandBox\Controller::run(filter_input(INPUT_GET, 'context') ?? 'main');
-    
-    $id = filter_input(INPUT_GET, 'id') ?? '';
-
-    if (!$id) {
-        wp_die('Invalid sandbox ID.');
-    }
-
-    // Build URL to plugin settings page with parameters
-    $url = add_query_arg(
-        [
-            'page'   => 'coder-sandbox',
-            'action' => 'sandbox',
-            'id'     => $id
-        ],
-        admin_url('admin.php')
-    );
-
-    wp_redirect($url);
-    exit;
+    return \CODERS\Sandbox\Controller::run( filter_input(INPUT_GET, 'context') ?? 'main');
 });
+
 
 
 interface ContentProvider{
@@ -61,7 +41,7 @@ interface ContentProvider{
 /**
  * 
  */
-class SandboxContent extends \CoderBox implements ContentProvider{
+class SandboxContent extends \CODERS\Sandbox\CoderBox implements ContentProvider{
     /**
      * @param string $name
      * @param string $endpoint
@@ -70,11 +50,11 @@ class SandboxContent extends \CoderBox implements ContentProvider{
         parent::__construct($name, $endpoint);
     }
     /**
-     * @param \CoderBox $box
-     * @return \CODERS\SandBox\SandboxContent
+     * @param \CODERS\Sandbox\CoderBox $box
+     * @return \CODERS\Sandbox\SandboxContent
      */
-    public static function create( \CoderBox $box = null ){
-        if( !is_null($box) && get_class($box) === \CoderBox::class){
+    public static function create(\CODERS\Sandbox\CoderBox $box = null ){
+        if( !is_null($box) && get_class($box) === \CODERS\Sandbox\CoderBox::class){
 
             $content = new SandboxContent($box->name, $box->endpoint);
             $content->populate($box->data());
@@ -84,12 +64,18 @@ class SandboxContent extends \CoderBox implements ContentProvider{
     }
             
     /**
-     * @return \CoderSandbox
+     * @return \CODERS\Sandbox\CoderSandbox
      */
     public static final function Sandbox(){
         
-        return \CoderSandbox::instance();
+        return \CODERS\Sandbox\CoderSandbox::instance();
         
+    }
+    /**
+     * @return \CODERS\Sandbox\SandboxData
+     */
+    public static final function SandboxData(){
+        return new \CODERS\Sandbox\SandboxData();
     }
     /**
      * @return array
@@ -129,14 +115,14 @@ class SandboxContent extends \CoderBox implements ContentProvider{
         return method_exists($this, $call) ?  $this->$call() : array();
     }
     /**
-     * @return \CoderBox[]
+     * @return \CODERS\Sandbox\CoderBox[]
      */
     static public function listBoxes() {
-        return self::Sandbox()->list();
+        return self::Sandbox()->list(true);
     }
     /**
      * @param string $id
-     * @return \CoderBox
+     * @return \CODERS\Sandbox\CoderBox
      */
     public static function import( $id = '' ) {
         foreach (self::listBoxes() as $box ){
@@ -205,7 +191,7 @@ abstract class Controller {
      */
     public static function create( $context = 'main'){
         
-        $class = sprintf('\CODERS\SandBox\%sController', ucfirst($context));
+        $class = sprintf('\CODERS\Sandbox\%sController', ucfirst($context));
         return class_exists($class) ? new $class( ) : new ErrorController();
     }
     
@@ -233,10 +219,12 @@ abstract class Controller {
      * @param String $action
      * @return bool
      */
-    public function action( $action = 'default' ){
+    public function action( ){
+        $input = self::input();
+        $action = array_key_exists('action', $input) ? $input['action'] : 'default';
         $command = sprintf('%sAction', $action ?? $this->context() );
         if(method_exists($this, $command)){
-            return $this->$command(self::input());
+            return $this->$command( $input );
         }
         return $this->error($action);
     }
@@ -271,12 +259,11 @@ abstract class Controller {
      */
     static function run($context = 'main' ) {
         $id = filter_input(INPUT_GET, 'id') ?? '';
-        $action = filter_input(INPUT_GET, 'action') ?? 'default';
         if(strlen($id) && $context === 'main'){
             $context = 'sandbox';
         }
-        $controller =  Controller::create( $context );
-        return !is_null($controller) ? $controller->action($action) ?? false : false;
+        $controller = Controller::create( $context );
+        return !is_null($controller) ? $controller->action() ?? false : false;
     }
 }
 
@@ -392,7 +379,7 @@ class View{
     
     /**
      * @param string $name
-     * @param array $args
+     * @param array $arguments
      * @return mixed
      */
     public function __call(string $name, array $arguments) {
@@ -436,7 +423,7 @@ class View{
      * @param array $args
      * @return string|url
      */
-    protected function link($link = '', array $args = array()) {
+    protected function link( $link = '' , array $args = array( ) ) {
         $call = sprintf('link%s', ucfirst($link));
         return method_exists($this, $call) ? $this->$call($args) : $this->url($link,$args);
     }
@@ -571,16 +558,45 @@ class View{
         return method_exists($this, $call) ? $this->$call() : false;
     }
     /**
+     * @return string|url
+     */
+    protected function linkForm() {
+        return esc_url(admin_url('admin-post.php'));
+    }
+    /**
+     * @return bool
+     */
+    protected function isNew() {
+        if( $this->hasContent() ){
+            return strlen($this->get('id')) === 0;
+        }
+        return true;
+    }
+    /**
      * @return bool
      */
     protected function hasContent(){
         return !is_null( $this->content());
     }
     /**
-     * @return \CoderBox[]
+     * @return \CODERS\Sandbox\CoderBox[]
      */
     protected function listBoxes() {
-        return SandboxContent::Sandbox()->list();
+        //return SandboxContent::SandboxData()->list();
+        return SandboxContent::Sandbox()->list(true);
+    }
+    /**
+     * @return array
+     */
+    protected function listMetadata() {
+        $data = $this->get('metadata');
+        if(!is_null($data) && strlen($data)){
+            $output = json_decode($data, true);
+            if(is_array($output)){
+                return $output;
+            }
+        }
+        return array();
     }
     /**
      * @param array $args
@@ -592,6 +608,12 @@ class View{
             $path = array_merge($path,$args);
         }
         return $this->url($path);
+    }
+    /**
+     * @return string|url
+     */
+    protected function linkApp() {
+        return $this->linkSandbox( array('id'=> $this->get('name') ));
     }
     /**
      * @param string $id

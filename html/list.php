@@ -1,5 +1,4 @@
 <h1 class="wp-heading-inline"><?php print get_admin_page_title() ?></h1>
-
 <table class="wp-list-table widefat fixed striped table-view-excerpt roles">
     <thead>
         <tr>
@@ -33,9 +32,10 @@
         <tr>
             <td colspan="6">
                 <a class="button button-primary right" target="_self" href="<?php
-                    print '#' ?>"><?php
+                    print $this->action_sandbox ?>"><?php
                     print __('New Sandbox','coder_sandbox') ?></a>
             </td>
         </tr>
     </tfoot>
 </table>
+
