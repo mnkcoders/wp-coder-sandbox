@@ -9,7 +9,7 @@ defined('ABSPATH') or exit;
 class CoderSandbox {
 
     /**
-     * @var \CoderSandbox
+     * @var \CODERS\Sandbox\CoderSandbox
      */
     private static $_instance = null;
 
@@ -17,7 +17,10 @@ class CoderSandbox {
      * @var String[]
      */
     private $_boxes = array();
-
+    /**
+     * @var array
+     */
+    private $_log = array();
     /**
      * 
      */
@@ -27,26 +30,52 @@ class CoderSandbox {
         }
     }
     /**
+     * @return array [content,type]
+     */
+    public function log() {
+        return  $this->_log;
+    }
+    /**
+     * @param string $content
+     * @param string $type
+     * @return \CODERS\Sandbox\CoderSandbox
+     */
+    public function notify($content = '',$type = 'info') {
+        if(strlen($content)){
+            $this->_log[]  =array(
+                'content' => $content,
+                'type' => $type,
+            );
+        }
+        return $this;
+    }
+    /**
+     * @return \CODERS\Sandbox\Data
+     */
+    public function data() {
+        return new Data();
+    }
+    /**
      * @param bool $refresh
      * @return \CODERS\Sandbox\CoderSandbox
      */
     public function list(  $refresh = false ){
         if( $refresh ){
-            $data = new SandboxData();
+            $data = new Data();
             $this->_boxes = array_map(function( $boxdata ){
-                return CoderBox::load($boxdata);
+                return Box::load($boxdata);
             }, $data->list());
         }
         return $this->_boxes;
     }
     /**
      * @param string $box
-     * @return \CODERS\Sandbox\CoderBox
+     * @return \CODERS\Sandbox\Box
      */
     public function load($box = '') {
         if(strlen($box)){
-            $db = new SandboxData();
-            return CoderBox::load( $db->load($box) );
+            $db = new Data();
+            return Box::load( $db->load($box) );
         }
         return null;
     }
@@ -62,22 +91,7 @@ class CoderSandbox {
         }
     }
     /**
-     * 
-     */
-    public static function install( ){
-        $data = new SandboxData();
-        $data->install();
-        self::rewrite(true);
-    }
-    /**
-     * 
-     */
-    public static function uninstall(){
-        //update rules to remove endpoint
-        flush_rewrite_rules();        
-    }
-    /**
-     * @return \CoderSandbox
+     * @return \CODERS\Sandbox\CoderSandbox
      */
     public static function instance() {
         if (self::$_instance === null) {
@@ -90,7 +104,7 @@ class CoderSandbox {
 /**
  * 
  */
-class CoderBox {
+class Box {
     /**
      * @var String[]
      */
@@ -133,7 +147,7 @@ class CoderBox {
     }
     /**
      * @param array $input
-     * @return \CoderBox
+     * @return \CODERS\Sandbox\Box
      */
     protected function populate( array $input  = array() ) {
         foreach($input as $var => $val ){
@@ -151,7 +165,7 @@ class CoderBox {
      * @return bool
      */
     public function save() {
-        $db = new SandboxData();
+        $db = new Data();
         if($this->isNew()){
             $this->_content['id'] = self::generateid($this->name);
             return $db->create($this->data());            
@@ -178,7 +192,7 @@ class CoderBox {
         return $data;
     }
     /**
-     * @param \CoderBox $box
+     * @param \CODERS\Sandbox\Box $box
      * @return bool
      */
     public function build( ){
@@ -290,11 +304,11 @@ class CoderBox {
     }
     /**
      * @param array $data
-     * @return \CoderBox|null
+     * @return \CODERS\Sandbox\Box|null
      */
     static function load( array $data = array()) {
         if(array_key_exists('name', $data)){
-            $box = new CoderBox($data['name']);
+            $box = new Box($data['name']);
             $box->populate($data);
             return $box;
         }
@@ -305,29 +319,21 @@ class CoderBox {
 /**
  * 
  */
-class SandboxData{
-    
-    private $_log = array();
-    
+class Data{
     /**
      * @param string $message
      * @param string $type
-     * @return \CODERS\Sandbox\SandboxData
+     * @return \CODERS\Sandbox\Data
      */
     protected function notify($message = '',$type='info') {
-        if(strlen($message)){
-            $this->_log[] = array(
-                'content' => $message,
-                'type' => $type
-            );
-        }
+        CoderSandbox::instance()->notify($message,$type); 
         return $this;
     }
     /**
      * @return array
      */
     public function log( ) {
-        return $this->_log;
+        return CoderSandbox::instance()->log();
     }
 
     /**

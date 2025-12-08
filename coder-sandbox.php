@@ -34,11 +34,15 @@ add_action('template_redirect', function () {
 });
 
 register_activation_hook(__FILE__, function(){
-    \CODERS\SandBox\CoderSandbox::install();
+    $sandbox = \CODERS\Sandbox\CoderSandbox::instance();
+    $sandbox->data()->install();
+    $sandbox->rewrite(true);
 });
 
 register_deactivation_hook(__FILE__, function(){
-    \CODERS\SandBox\CoderSandbox::uninstall();
+    flush_rewrite_rules();        
+    //$sandbox = \CODERS\Sandbox\CoderSandbox::instance();
+    //$sandbox->uninstall();
 });
 
 

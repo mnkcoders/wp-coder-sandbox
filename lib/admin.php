@@ -1,4 +1,4 @@
-<?php namespace CODERS\Sandbox;
+<?php namespace CODERS\Sandbox\Admin;
 
 defined('ABSPATH') or exit;
 
@@ -9,7 +9,8 @@ add_action('admin_menu', function () {
             'manage_options',
             'coder-sandbox',
             function () {
-                \CODERS\Sandbox\Controller::run(filter_input(INPUT_GET, 'context') ?? 'main');
+                \CODERS\Sandbox\Admin\Controller::redirect(
+                        filter_input(INPUT_GET, 'context') ?? 'admin');
             }, 'dashicons-screenoptions', 40
     );
     add_submenu_page(
@@ -19,29 +20,34 @@ add_action('admin_menu', function () {
             'manage_options',
             'coder-sandbox-settings', // submenu slug
             function () {
-                \CODERS\Sandbox\Controller::run('settings');
+                \CODERS\Sandbox\Admin\Controller::redirect('settings');
             }
     );
 });
-
-add_action('admin_post_sandbox', function () {
-    return \CODERS\Sandbox\Controller::run( filter_input(INPUT_GET, 'context') ?? 'main');
+add_action('admin_enqueue_scripts',function(){
+    \CODERS\Sandbox\Admin\View::load(filter_input(INPUT_GET, 'page') ?? '');
+});
+add_action('admin_post_coder_sandbox', function () {
+    \CODERS\Sandbox\Admin\Controller::redirect( 'form' , INPUT_POST );
+    wp_redirect(add_query_arg(array('page'=>'coder-sandbox'), admin_url('admin.php')));
+});
+add_action('wp_ajax_coder_sandbox', function(){
+    $server = \CODERS\Sandbox\Admin\Controller::redirect('ajax',INPUT_POST);
+    wp_send_json($server->response());
+    exit;
+});
+// if non-logged-in allowed:
+add_action('wp_ajax_nopriv_coder_sandbox', function(){
+    $server = \CODERS\Sandbox\Admin\Controller::redirect('ajax',INPUT_POST);
+    wp_send_json($server->response());
+    exit;
 });
 
-
-
-interface ContentProvider{
-    public function get($name = '') : string;
-    public function list($name = '') : array;
-    public function is($name = '') : bool;
-    public function has($name = '') : bool;
-    public function content() : array;
-}
 
 /**
  * 
  */
-class SandboxContent extends \CODERS\Sandbox\CoderBox implements ContentProvider{
+class Content extends \CODERS\Sandbox\Box{
     /**
      * @param string $name
      * @param string $endpoint
@@ -50,13 +56,12 @@ class SandboxContent extends \CODERS\Sandbox\CoderBox implements ContentProvider
         parent::__construct($name, $endpoint);
     }
     /**
-     * @param \CODERS\Sandbox\CoderBox $box
-     * @return \CODERS\Sandbox\SandboxContent
+     * @param \CODERS\Sandbox\Box $box
+     * @return \CODERS\Sandbox\Admin\Content
      */
-    public static function create(\CODERS\Sandbox\CoderBox $box = null ){
-        if( !is_null($box) && get_class($box) === \CODERS\Sandbox\CoderBox::class){
-
-            $content = new SandboxContent($box->name, $box->endpoint);
+    public static function create(\CODERS\Sandbox\Box $box = null ){
+        if( !is_null($box) && get_class($box) === \CODERS\Sandbox\Box::class){
+            $content = new Content($box->name, $box->endpoint);
             $content->populate($box->data());
             return $content;
         }
@@ -66,16 +71,14 @@ class SandboxContent extends \CODERS\Sandbox\CoderBox implements ContentProvider
     /**
      * @return \CODERS\Sandbox\CoderSandbox
      */
-    public static final function Sandbox(){
-        
+    public static final function sandbox(){
         return \CODERS\Sandbox\CoderSandbox::instance();
-        
     }
     /**
-     * @return \CODERS\Sandbox\SandboxData
+     * @return \CODERS\Sandbox\Data
      */
-    public static final function SandboxData(){
-        return new \CODERS\Sandbox\SandboxData();
+    public function data(){
+        return self::sandbox()->data();
     }
     /**
      * @return array
@@ -115,14 +118,16 @@ class SandboxContent extends \CODERS\Sandbox\CoderBox implements ContentProvider
         return method_exists($this, $call) ?  $this->$call() : array();
     }
     /**
-     * @return \CODERS\Sandbox\CoderBox[]
+     * @return \CODERS\Sandbox\Box[]
      */
     static public function listBoxes() {
-        return self::Sandbox()->list(true);
+        return array_map( function( $box ){
+            return \CODERS\Sandbox\Admin\Content::create($box);
+        },self::sandbox()->list(true));
     }
     /**
      * @param string $id
-     * @return \CODERS\Sandbox\CoderBox
+     * @return \CODERS\Sandbox\Box
      */
     public static function import( $id = '' ) {
         foreach (self::listBoxes() as $box ){
@@ -133,166 +138,236 @@ class SandboxContent extends \CODERS\Sandbox\CoderBox implements ContentProvider
         return null;
     }
 }
+
 /**
  * 
  */
-class SettingsContent implements ContentProvider{
+class Controller {
     
-    function __construct() {
-        
-    }
-
-
-    public function content(): array {
-        return array();
-    }
-
-    public function get($name = ''): string {
-        
-        return '';
-    }
-
-    public function has($name = ''): bool {
-        return false;
-    }
-
-    public function is($name = ''): bool {
-        return false;
-    }
-
-    public function list($name = ''): array {
-        return array();
-    }
-}
-/**
- * 
- */
-abstract class Controller {
-
-    /**
-     * @var String
-     */
-    //private $_context = '';
+    const POST = INPUT_POST;
+    const GET = INPUT_GET;
+    const COOKIE = INPUT_COOKIE;
+    const REQUEST = 3;
+    //const AJAX = 4;
+    const SERVER = INPUT_SERVER;
+    
     /**
      * @var array
      */
-    private static $_mailbox = array();
-
+    private $_content = array();
     /**
-     * 
-     * @param String $context
+     * @var array
      */
-    protected function __construct( ) {
-        //$this->_context = $context;
-    }
-    /**
-     * @param string $context
-     * @return \Controller
-     */
-    public static function create( $context = 'main'){
-        
-        $class = sprintf('\CODERS\Sandbox\%sController', ucfirst($context));
-        return class_exists($class) ? new $class( ) : new ErrorController();
-    }
+    private $_response = array();
     
+    /**
+     * @param array $input
+     */
+    protected function __construct( array $input = array() ) {
+        $this->_content = $input;
+    }
+    /**
+     * @param String $name
+     * @return String
+     */
+    public function __get($name) {
+        return $this->content()[$name] ?? '';
+    }
     /**
      * @return String
      */
-    public function context(){
-        return $this->_context;
+    public function type(){
+        $type = explode('\\',get_called_class());
+        return $type[count($type)-1];
     }
-    /**
-     * @param String $content
-     * @param String $type
-     */
-    protected static function notify($content = '' , $type = 'info' ) {
-        Controller::$_mailbox[] = array('content'=>$content,'type'=>$type);
-    }
-    
+
     /**
      * @return array
      */
-    public static function mailbox(){
-        return Controller::$_mailbox;
+    private function content(){
+        return $this->_content;
     }
     /**
-     * @param String $action
-     * @return bool
+     * @return String
      */
-    public function action( ){
-        $input = self::input();
-        $action = array_key_exists('action', $input) ? $input['action'] : 'default';
-        $command = sprintf('%sAction', $action ?? $this->context() );
-        if(method_exists($this, $command)){
-            return $this->$command( $input );
+    protected function action(){
+        return $this->content()['action'] ?? 'main';
+    }
+
+    /**
+     * @return Array
+     */
+    public function response() { return $this->_response; }
+    
+    /**
+     * @param string $att
+     * @param string $value
+     * @return \CODERS\Sandbox\Admin\Controller
+     */
+    protected function put($att = '' , $value = ''){
+        if(strlen($att)){
+            $this->_response[$att] = $value;
         }
-        return $this->error($action);
-    }
-    /**
-     * @param string $action
-     * @return \Controller
-     */
-    protected function error( $action = '' ){
-        self::notify(sprintf('Invaild action %s',$action));
-        View::create('error')->render();
         return $this;
     }
     /**
-     * @param array $input
+     * @param array $data
+     * @return \CODERS\Sandbox\Admin\Controller
+     */
+    protected function fill( array $data = array()) {
+        foreach($data as $var => $val ){
+            $this->_response[$var] = $val;
+        }
+        return $this;
+    }
+    /**
+     * @param string $context main as default
+     * @return \CODERS\Sandbox\Admin\View
+     */
+    protected function layout( $context = 'main' ){
+        return View::create( strlen($context) ? $context : $this->action());
+    }
+
+    /**
+     * @return string
+     */
+    public static function log(){
+        return self::manager()->log();
+    }
+    /**
+     * @param string $content
+     * @param string $type
+     * @return \CODERS\Sandbox\Admin\Controller
+     */
+    public function notify($content = '' , $type = 'info'){
+        self::manager()->notify($content,$type);
+        return $this;
+    }
+
+    /**
+     * @return \CODERS\Sandbox\CoderSandbox
+     */
+    public static function manager(){
+        return Content::sandbox();
+    }
+    /**
+     * @return \CODERS\Tiers\Data
+     */
+    protected function data(){
+        return self::manager()->db();
+    }
+
+
+    /**
+     * @param string $action
+     * @return \CODERS\Sandbox\Admin\Controller
+     */
+    protected function run(){
+        try{
+            $action = $this->action();
+            $call = sprintf('%sAction', $action );
+            $this->put('_type',$this->type())->put('_action',$action);
+            $response = method_exists($this, $call) ?
+                $this->$call( ) :
+                    $this->error($action);
+            return $this->put('_response',$response);
+        }
+        catch (\Exception $ex) {
+            $this->notify($ex->getMessage(),'error');
+        }
+        return $this->put('_response',false);
+    }    
+    /**
      * @return bool
      */
-    abstract protected function defaultAction( array $input = array() );    
-    
+    protected function error( ){
+        $this->notify(sprintf('Invalid action <strong>[ %s ]</strong>',$this->action()), 'error');
+        return false;
+    }
     /**
-     * @return String[]
+     * @return boolean
      */
-    static function input() {
-        return array_merge(
-                filter_input_array(INPUT_GET, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: [],
-                filter_input_array(INPUT_POST, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: []
-        );
+    protected function mainAction(){
+        //implement in subclasses ;)
+        $this->notify('Implement Controller subclass ;)');
+        return true;
+    }
+    /**
+     * Redirect to a new controller with custom inputs
+     * @param string $context
+     * @param array $input
+     * @return \CODERS\Sandbox\Admin\Controller
+     */
+    public function forward( $context = '' , array $input = array()){
+        return self::create($context, $input);
+    }
+
+
+    /**
+     * @param String $context
+     * @param array $input
+     * @return \CODERS\Sandbox\Admin\Controller
+     */
+    private static function create( $context = '' ,array $input = array()){
+        $class = sprintf('\CODERS\Sandbox\Admin\%sController', ucfirst($context));
+        return class_exists($class) && is_subclass_of($class, self::class,true) ?
+                new $class( $input ) :
+                    new Controller($input);
     }
 
     /**
      * @param String $context
-     * @return bool
+     * @param int $type
+     * @return \CODERS\Sandbox\Admin\Controller
      */
-    static function run($context = 'main' ) {
-        $id = filter_input(INPUT_GET, 'id') ?? '';
-        if(strlen($id) && $context === 'main'){
-            $context = 'sandbox';
-        }
-        $controller = Controller::create( $context );
-        return !is_null($controller) ? $controller->action() ?? false : false;
+    public static final function redirect( $context = 'admin' ,$type = self::REQUEST ) {
+        return self::create($context, self::input($type, $type === self::POST))->run();
     }
+    
+   /**
+    * @param Int $type POST,GET,REQUEST,SERVER,COOKIE
+    * @param bool $maskaction parse task to action
+    * @return array
+    */
+   public static function input($type = self::REQUEST , $maskaction = false ){
+        switch($type){
+            case self::COOKIE:
+                return filter_input_array(INPUT_COOKIE,FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: [];
+            case self::POST:
+                $input = filter_input_array(INPUT_POST, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: [];
+                if( $maskaction ){
+                    $input['action'] = $input['task'] ?? 'main';
+                    unset($input['task']);
+                }
+                return $input;
+            case self::GET:
+                return filter_input_array(INPUT_GET, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: [];
+            case self::REQUEST:
+                return array_merge(
+                    filter_input_array(INPUT_GET, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: [],
+                    filter_input_array(INPUT_POST, FILTER_SANITIZE_FULL_SPECIAL_CHARS) ?: []
+            );
+            default:
+                return array();
+        }
+   }
 }
 
-class ErrorController extends Controller{
-    /**
-     * @param array $input
-     * @return bool
-     */
-    protected function defaultAction(array $input = []): bool {
-        $this->error();
-        return false;
-    }
-}
+
+
 
 /**
  * 
  */
-class MainController extends Controller{
+class AdminController extends Controller{
     
     /**
-     * @param array $input
      * @return bool
      */
-    protected function defaultAction( array $input = array() ){
+    protected function mainAction( ){
         
-        //$this->notify('Default message');
-        
-        View::create()
-                //->setContent($content)
+        $this->layout()
+                //->setData($content)
                 ->view('list');
         
         return true;
@@ -307,11 +382,8 @@ class SandboxController extends Controller{
      * @param array $input
      * @return bool
      */
-    protected function defaultAction(array $input = []): bool {
-        
-        $id = array_key_exists('id', $input) ? $input['id'] : '';
-        $box = SandboxContent::import($id);
-        View::create('sandbox')->setContent($box)->view('box');
+    protected function mainAction(): bool {
+        $this->layout()->setContent(Content::import($this->id))->view('box');
         return true;
     }
 }
@@ -324,16 +396,56 @@ class SettingsController extends Controller{
      * @param array $input
      * @return bool
      */
-    protected function defaultAction(array $input = []): bool {
-
-        View::create('settings')->setContent(new SettingsContent())->view('settings');
+    protected function mainAction(): bool {
+        $this->layout()
+                //->setContent(new SettingsContent())
+                ->view('settings');
 
         return true;
     }
 }
-
-
-
+/**
+ * 
+ */
+class FormController extends Controller{
+    /**
+     * @return bool
+     */
+    protected function mainAction() {
+        $this->put('items', array());
+        return false;
+    }
+    /**
+     * @return bool
+     */
+    protected function saveAction() {
+        return false;
+    }
+    /**
+     * @return bool
+     */
+    protected function removeAction() {
+        return false;
+    }
+    /**
+     * @return bool
+     */
+    protected function updateAction() {
+        return false;
+    }
+    /**
+     * @return bool
+     */
+    protected function createAction() {
+        return false;
+    }
+}
+/**
+ * 
+ */
+class AjaxController extends Controller{
+    
+}
 
 
 /**
@@ -341,280 +453,162 @@ class SettingsController extends Controller{
  */
 class View{
     /**
-     * @var ContentProvider
-     */
-    private $_content = null;
-    /**
      * @var string
      */
     private $_context = '';
+    /**
+     * @var \Object
+     */
+    private $_data = null;
+    
+    /**
+     * @var array
+     */
+    private $_attributes = array(
+        //define controller-view attributes here
+    );
     
     /**
      * @param string $context
      */
-    function __construct( $context = '' ) {
+    protected function __construct( $context = 'main' ) {
         $this->_context = $context;
     }
     /**
      * @param string $context
-     * @return \View
+     * @return \CODERS\Sandbox\Admin\View
      */
-    static public function create($context = 'default') {
+    public static function create( $context = '' ){
         return new View($context);
     }
     /**
-     * @param ContentProvider $content
-     * @return \View Description
+     * @param \Object $data
+     * @return \CODERS\Admin\View
      */
-    public function setContent(ContentProvider $content = null ){
-        $this->_content = $content;
+    public function setData($data = null ){
+        $this->_data = is_subclass_of($data, object) ? $data : null;
         return $this;
     }
     /**
-     * @return ContentProvider
+     * @return \Object
      */
-    protected function content(){
-        return $this->_content;
+    public function data() {
+        return $this->_data;
     }
-    
+    /**
+     * @return string
+     */
+    public function context(){
+        return $this->_context;
+    }
+
+    /**
+     * @param String $view
+     * @return String
+     */
+    private function path($view = '') {
+        return !empty($view) ?
+            sprintf('%s/html/%s.php', preg_replace('/\\\\/', '/', CODER_SANDBOX_DIR), $view) : '';
+    }
+
+    /**
+     * @param string $name
+     * @return mixed
+     */
+    public function __get($name) {
+        return $this->$name();
+    }
     /**
      * @param string $name
      * @param array $arguments
      * @return mixed
      */
-    public function __call(string $name, array $arguments) {
+    public function __call($name , $arguments ) {
         $args = is_array($arguments) ? $arguments : array();
         switch(true){
             case preg_match('/^get_/', $name):
-                return $this->get(substr($name, 5));
+                $get = sprintf('get%s', ucfirst(substr($name, 4)));
+                return method_exists($this, $get) ? $this->$get() : '';
             case preg_match('/^list_/', $name):
-                return $this->__list(substr($name, 5));
+                $list = sprintf('list%s', ucfirst(substr($name,5)));
+                return method_exists($this, $list) ? $this->$list(...$args) : array();
             case preg_match('/^is_/', $name):
-                return $this->__is(substr($name, 3));
+                $is = sprintf('is%s', ucfirst(substr($name, 3)));
+                return method_exists($this, $is) ? $this->$is(...$args) : false;
             case preg_match('/^has_/', $name):
-                return $this->__has(substr($name, 4));
+                $has = sprintf('has%s', ucfirst(substr($name, 4)));
+                return method_exists($this, $has) ? $this->$has(...$args) : false;
             case preg_match('/^show_/', $name):
-                return $this->__show(substr($name, 5));
-            case preg_match('/^action_/', $name):
-                return $this->action(
-                        substr($name, 7),
-                        isset($args[0]) ? $args[0]: array());
-            case preg_match('/^link/', $name):
-                return $this->link(
-                        substr($name, 5),
-                        isset($args[0]) ? $args[0] : array());
-            case preg_match('/^url/', $name):
-                return $this->url(
-                    explode( '_', substr($name, 4)),
-                    isset($args[0]) ? $args[0] : array() );
+                $show = $this->path(sprintf('templates/%s',substr($name, 5)) );
+                if(file_exists($show)) {
+                    require $show;
+                    printf('<!-- %s -->',$name);
+                    return true;
                 }
-        return $this->get($name);
+                return false;
+        }
+        return array_key_exists($name,$this->_attributes) ? $this->_attributes[$name] : '';
     }
     /**
-     * @param string $name
-     * @return mixed
+     * @return string
      */
-    public function __get(string $name) {
-        return $this->$name();
+    protected function getNonce(){
+        return wp_nonce_field('coder_nonce');
+    }
+    /**
+     * @return String
+     */
+    protected function getFormurl(){
+        return esc_url(admin_url('admin-post.php'));
+    }
+
+    /**
+     * @return array
+     */
+    protected function listMessages(){
+        return Controller::log();
+    }
+
+    /**
+     * @param string $name
+     * @return bool Description
+     */
+    public function view($name = ''){
+        $view = $this->path( strlen($name ) ? $name : $this->context());
+        if(!empty($view) && file_exists($view)){
+            $this->viewMessages();
+            require $view;
+            return true;
+        }
+        printf('<!-- INVALID VIEW %s -->',$name);
+        return false;
     }
     /**
      * 
-     * @param string $link
-     * @param array $args
-     * @return string|url
      */
-    protected function link( $link = '' , array $args = array( ) ) {
-        $call = sprintf('link%s', ucfirst($link));
-        return method_exists($this, $call) ? $this->$call($args) : $this->url($link,$args);
-    }
-    /**
-     * @param array $path
-     * @param array $args
-     * @return string
-     */
-    private function url( $path = array() , array $args = array() ){
-        $base_url = site_url( count($path) ? implode('/', $path) : '' );
+    public static function load($page = '') {
+        if ($page === 'coder-sandbox') {
+            $script = sprintf('%shtml/content/script.js', CODER_SANDBOX_URL);
+            $script_path = sprintf('%shtml/content/script.js', CODER_SANDBOX_DIR);
+            // Register and enqueue JS
+            wp_enqueue_script('sandbox-admin-script', $script, ['jquery'], filemtime($script_path), true);
 
-        $get = array();
+            // Optional: Pass variables to JS
+            wp_localize_script('sandbox-admin-script', 'CoderSandboxApi', [
+                'url' => admin_url('admin-ajax.php'),
+                'nonce' => wp_create_nonce('coder_nonce')
+            ]);
+        }
+    }
+}
 
-        foreach( $args as $var => $val ){
-            $get[] = sprintf('%s=%s',$var,$val);
-        }
+/**
+ * 
+ */
+class SandboxView extends \CODERS\Sandbox\Admin\View{
 
-        if( count( $get )){
-            $base_url .=  '?' . implode('&', $get);
-        }
 
-        return $base_url;
-    }
-    /**
-     * @param array $args
-     * @return string|url
-     */
-    private function adminurl( array $args = array()){
-        //$admin_url = menu_page_url('coder-sandbox');
-        $admin_url = admin_url('admin.php?page=coder-sandbox');
-        $get = array();
-        foreach ($args as $var => $val ){
-            $get[] = $var . '=' . $val;
-        }
-        return count($args) ? $admin_url . '&' . implode('&', $get) : $admin_url;
-    }
-    /**
-     * @param string $action
-     * @param array $args
-     * @return string
-     */
-    protected function action( $action = '' , array $args = array()){
-        $call = sprintf('action%s', ucfirst($action));
-        if(method_exists($this, $call)){
-            return $this->$call($args);
-        }
-        if(strlen($action)){
-            $args['action'] = $action;
-        }
-        return $this->adminurl($args);
-    }
-    /**
-     * @param string $name
-     * @return string
-     */
-    protected function path($name = ''){
-        return sprintf('%s/html/%s',CODER_SANDBOX_DIR,$name);
-    }
-    /**
-     * @param string $name
-     * @return string
-     */
-    protected function get($name) {
-        $call = sprintf('get%s', ucfirst($name));
-        if(method_exists($this, $call)){
-            return $this->$call();
-        }
-        return $this->hasContent() ? $this->content()->$name : '';
-    }
-    /**
-     * @param string $view
-     * @return bool
-     */
-    public function view($view = ''){
-        $this->viewMessages(Controller::mailbox() );
-        $path = $this->path(sprintf('%s.php', strlen($view) ? $view : $this->_context));
-        if(file_exists($path)){
-            require $path;
-        }
-        else{
-            require $this->path('error.php');
-        }
-        return $this;
-    }
-    /**
-     * @param array $messages
-     * @return \View
-     */
-    protected function viewMessages( array $messages = array() ){
-        foreach( $messages as $message ){
-            printf('<div class="notice is-dismissible %s">%s</div>',$message['type'],$message['content']);
-        }
-        return $this;
-    }    
-    /**
-     * @param string $action
-     * @param array $args
-     * @return string
-     */
-    protected function __action($action = '' , $args = array() ) {
-        return $this->action($action, is_array($args) ? $args : array());
-    }
-    /**
-     * @param string $show
-     * @return bool
-     */
-    protected function __show($show = ''){
-        return strlen($show) ? $this->view(sprintf('parts/%s.php',$show)) : false;
-    }
-    /**
-     * @param string $list
-     * @return array
-     */
-    protected function __list($list = ''){
-        $call = sprintf('list%s', ucfirst($list));
-        return method_exists($this, $call) ? $this->$call() : array();
-    }
-    /**
-     * @param string $has
-     * @return bool
-     */
-    protected function __has($has = '') {
-        $call = sprintf('has%s', ucfirst($has));
-        return method_exists($this, $call) ? $this->$call() : false;
-    }
-    /*
-     * @param string $has
-     * @return bool
-     */
-    protected function __is( $is = '' ){
-        $call = sprintf('is%s', ucfirst($is));
-        return method_exists($this, $call) ? $this->$call() : false;
-    }
-    /**
-     * @return string|url
-     */
-    protected function linkForm() {
-        return esc_url(admin_url('admin-post.php'));
-    }
-    /**
-     * @return bool
-     */
-    protected function isNew() {
-        if( $this->hasContent() ){
-            return strlen($this->get('id')) === 0;
-        }
-        return true;
-    }
-    /**
-     * @return bool
-     */
-    protected function hasContent(){
-        return !is_null( $this->content());
-    }
-    /**
-     * @return \CODERS\Sandbox\CoderBox[]
-     */
-    protected function listBoxes() {
-        //return SandboxContent::SandboxData()->list();
-        return SandboxContent::Sandbox()->list(true);
-    }
-    /**
-     * @return array
-     */
-    protected function listMetadata() {
-        $data = $this->get('metadata');
-        if(!is_null($data) && strlen($data)){
-            $output = json_decode($data, true);
-            if(is_array($output)){
-                return $output;
-            }
-        }
-        return array();
-    }
-    /**
-     * @param array $args
-     * @return string
-     */
-    protected function linkSandbox( array $args = array()){
-        $path = array('sandbox');
-        if( count($args)){
-            $path = array_merge($path,$args);
-        }
-        return $this->url($path);
-    }
-    /**
-     * @return string|url
-     */
-    protected function linkApp() {
-        return $this->linkSandbox( array('id'=> $this->get('name') ));
-    }
+
     /**
      * @param string $id
      * @return string|url
@@ -624,9 +618,6 @@ class View{
         return $this->adminurl($args);
     }
 }
-
-
-
 
 
 
