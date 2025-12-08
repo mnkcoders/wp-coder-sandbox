@@ -55,6 +55,91 @@ class Content extends \CODERS\Sandbox\Box{
     public function __construct($name = '' , $endpoint = '') {
         parent::__construct($name, $endpoint);
     }
+    public function __get($name){
+        switch($name){
+            case 'state': return $this->getState();
+        }
+        return parent::__get($name);
+    }
+
+    /**
+     * @return \CODERS\Sandbox\Data
+     */
+    public function data(){
+        return self::sandbox()->data();
+    }
+    /**
+     * @return array
+     */
+    public function listMetadata(){
+        return $this->metadata ?? array();
+    }
+    /**
+     * @return boolean
+     */
+    public function isReady(){
+        return Content::sandbox()->check($this->name);
+    }
+    /**
+     * @return string
+     */
+    public function getState(){
+        return $this->isReady() ?
+                __('ready','coder_sandbox') :
+                __('empty','coder_sandbox') ;
+    }
+
+    /**
+     * @return String
+     */
+    public function getName(){
+        return $this->name;
+    }
+    /**
+     * @return String
+     */
+    public function getTitle(){
+        return $this->title;
+    }
+    /**
+     * @return String
+     */
+    public function getTier(){
+        return $this->tier;
+    }
+    /**
+     * @return string
+     */
+    public function getCreated(){
+        return $this->created;
+    }
+
+    /**
+     * @return Boolean
+     */
+    public function isNew(){
+        return false;
+    }
+    /**
+     * @return String
+     */
+    public function getId(){
+        return $this->id;
+    }
+    /**
+     * @return String
+     */
+    public function getEndpoint(){
+        return $this->endpoint;
+    }
+    /**
+     * @return String
+     */
+    public function getUrl(){
+        return self::sandbox()->link($this->name);
+    }
+
+    
     /**
      * @param \CODERS\Sandbox\Box $box
      * @return \CODERS\Sandbox\Admin\Content
@@ -62,7 +147,7 @@ class Content extends \CODERS\Sandbox\Box{
     public static function create(\CODERS\Sandbox\Box $box = null ){
         if( !is_null($box) && get_class($box) === \CODERS\Sandbox\Box::class){
             $content = new Content($box->name, $box->endpoint);
-            $content->populate($box->data());
+            $content->populate($box->content());
             return $content;
         }
         return null;
@@ -74,51 +159,9 @@ class Content extends \CODERS\Sandbox\Box{
     public static final function sandbox(){
         return \CODERS\Sandbox\CoderSandbox::instance();
     }
+
     /**
-     * @return \CODERS\Sandbox\Data
-     */
-    public function data(){
-        return self::sandbox()->data();
-    }
-    /**
-     * @return array
-     */
-    public function content() : array {
-        return $this->data();
-    }
-    /**
-     * @param string $get
-     * @return string
-     */
-    public function get($get = ''): string {
-        return $this->$get;
-    }
-    /**
-     * @param string $has
-     * @return bool
-     */
-    public function has($has = ''): bool {
-        $call = sprintf('has%s', ucfirst($has));
-        return method_exists($this, $call) ? $this->$call() : array_key_exists($has, $this->content());
-    }
-    /**
-     * @param string $is
-     * @return bool
-     */
-    public function is($is = ''): bool {
-        $call = sprintf('is%s', ucfirst($is));
-        return method_exists($this, $call) ? $this->$call() : false;
-    }
-    /**
-     * @param string $list
-     * @return array
-     */
-    public function list($list = ''): array {
-        $call = sprintf('list%s', ucfirst($list));
-        return method_exists($this, $call) ?  $this->$call() : array();
-    }
-    /**
-     * @return \CODERS\Sandbox\Box[]
+     * @return \CODERS\Sandbox\Admin\Content[]
      */
     static public function listBoxes() {
         return array_map( function( $box ){
@@ -127,12 +170,12 @@ class Content extends \CODERS\Sandbox\Box{
     }
     /**
      * @param string $id
-     * @return \CODERS\Sandbox\Box
+     * @return \CODERS\Sandbox\Admin\Content
      */
     public static function import( $id = '' ) {
-        foreach (self::listBoxes() as $box ){
-            if( $box->id === $id ){
-                return self::create($box);
+        foreach (self::listBoxes() as $content ){
+            if( $content->id === $id ){
+                return $content;
             }
         }
         return null;
@@ -366,7 +409,7 @@ class AdminController extends Controller{
      */
     protected function mainAction( ){
         
-        $this->layout()
+        $this->layout('sandbox')
                 //->setData($content)
                 ->view('list');
         
@@ -378,12 +421,27 @@ class AdminController extends Controller{
  */
 class SandboxController extends Controller{
     
+    protected function error() {
+        parent::error();
+        $this->layout()->view('error');
+        return false;
+    }
+    /**
+     * @return bool
+     */
+    protected function mainAction() : bool{
+        return $this->sandboxAction();
+    }
+
     /**
      * @param array $input
      * @return bool
      */
-    protected function mainAction(): bool {
-        $this->layout()->setContent(Content::import($this->id))->view('box');
+    protected function sandboxAction(): bool {
+        $box = Content::import($this->id);
+        $this->layout('sandbox')
+                ->setData($box)
+                ->view('box');
         return true;
     }
 }
@@ -479,6 +537,10 @@ class View{
      * @return \CODERS\Sandbox\Admin\View
      */
     public static function create( $context = '' ){
+        $class = sprintf('\CODERS\Sandbox\Admin\%sView', ucfirst($context));
+        if(class_exists($class) && is_subclass_of($class, self::class)){
+            return new $class($context);
+        }
         return new View($context);
     }
     /**
@@ -486,7 +548,7 @@ class View{
      * @return \CODERS\Admin\View
      */
     public function setData($data = null ){
-        $this->_data = is_subclass_of($data, object) ? $data : null;
+        $this->_data = is_object($data) ? $data : null;
         return $this;
     }
     /**
@@ -516,7 +578,24 @@ class View{
      * @return mixed
      */
     public function __get($name) {
-        return $this->$name();
+        $source = $this->data() ?? $this;
+        switch(true){
+            case preg_match('/^get_/', $name):
+                $get = sprintf('get%s', ucfirst(substr($name, 4)));
+                return method_exists($source, $get) ? $source->$get() : '';
+            case preg_match('/^list_/', $name):
+                $list = sprintf('list%s', ucfirst(substr($name,5)));
+                return method_exists($source, $list) ? $source->$list() : array();
+            case preg_match('/^is_/', $name):
+                $is = sprintf('is%s', ucfirst(substr($name, 3)));
+                return method_exists($source, $is) ? $source->$is() : false;
+            case preg_match('/^has_/', $name):
+                $has = sprintf('has%s', ucfirst(substr($name, 4)));
+                return method_exists($source, $has) ? $source->$has() : false;
+            default:
+                return '';
+                //return $this->_attributes[$name] ?? '';
+        }
     }
     /**
      * @param string $name
@@ -528,7 +607,7 @@ class View{
         switch(true){
             case preg_match('/^get_/', $name):
                 $get = sprintf('get%s', ucfirst(substr($name, 4)));
-                return method_exists($this, $get) ? $this->$get() : '';
+                return method_exists($this, $get) ? $this->$get(...$args) : '';
             case preg_match('/^list_/', $name):
                 $list = sprintf('list%s', ucfirst(substr($name,5)));
                 return method_exists($this, $list) ? $this->$list(...$args) : array();
@@ -538,16 +617,35 @@ class View{
             case preg_match('/^has_/', $name):
                 $has = sprintf('has%s', ucfirst(substr($name, 4)));
                 return method_exists($this, $has) ? $this->$has(...$args) : false;
+            case preg_match('/^action_/', $name):
+                return $this->action(substr($name, 7),...$args);
             case preg_match('/^show_/', $name):
                 $show = $this->path(sprintf('templates/%s',substr($name, 5)) );
                 if(file_exists($show)) {
                     require $show;
                     printf('<!-- %s -->',$name);
-                    return true;
                 }
-                return false;
+                break;
         }
-        return array_key_exists($name,$this->_attributes) ? $this->_attributes[$name] : '';
+        return '';
+    }
+    /**
+     * @param string $action
+     * @param array $args
+     * @return string
+     */
+    protected function action( $action = '' , array $args = array()){
+        $query = array('page'=>'coder-sandbox');
+        if(strlen($action)){
+            $query['action'] = $action;            
+        }
+        if(strlen($this->_context)){
+            $query['context'] = $this->_context;            
+        }
+        foreach( $args as $var => $val ){
+            $query[$var] = $val;
+        }
+        return add_query_arg($query);
     }
     /**
      * @return string
@@ -606,8 +704,34 @@ class View{
  * 
  */
 class SandboxView extends \CODERS\Sandbox\Admin\View{
+    /**
+     * @return \CODERS\Sandbox\Admin\Content[
+     */
+    protected function listBoxes(){
+        return Content::listBoxes();
+    }
+    /**
+     * @return array
+     */
+    protected function listTiers(){
+        $tiers = apply_filters('coder_tiers',array());
+        return is_array($tiers) ? $tiers : array();
+    }
+    /**
+     * @param string $box
+     * @return boolean
+     */
+    protected function isReady( $box = '' ){
+        return Content::sandbox()->check($box);
+    }
 
-
+    /**
+     * @param string $name
+     * @return string
+     */
+    protected function getUrl( $name ){
+        return Content::sandbox()->link($name);
+    }
 
     /**
      * @param string $id

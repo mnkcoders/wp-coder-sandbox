@@ -79,8 +79,33 @@ class CoderSandbox {
         }
         return null;
     }
-    
     /**
+     * @param string $name
+     * @return string
+     */
+    public function link( $name = ''){
+        return sprintf('%s/sandbox/%s', get_site_url(),$name);
+    }
+    /**
+     * @param string $box
+     * @param boolean $getdir
+     * @return string
+     */
+    public function drive( $box = '' , $getdir = false ){
+        $drive = wp_upload_dir();
+        return sprintf('%ssandbox/%s',
+                trailingslashit( $getdir ? $drive['basedir'] : $drive['baseurl']),
+                !empty($box) ? $box . '/' : '');
+    }
+    /**
+     * @param string $box
+     * @return boolean
+     */
+    public function check( $box = '' ){
+        return file_exists($this->drive($box,true));
+    }
+
+        /**
      * @param bool $flush
      */
     public static function rewrite( $flush = false ){
@@ -142,7 +167,7 @@ class Box {
     /**
      * @return array
      */
-    protected function data(){
+    public function content(){
         return $this->_content;
     }
     /**
@@ -168,10 +193,10 @@ class Box {
         $db = new Data();
         if($this->isNew()){
             $this->_content['id'] = self::generateid($this->name);
-            return $db->create($this->data());            
+            return $db->create($this->content());            
         }
         else{
-            return $db->update($this->data());
+            return $db->update($this->content());
         }
     }
     /**
@@ -297,10 +322,11 @@ class Box {
      * @return String
      */
     static function uploads( $container = '' ,$getdir = false){
-        $upload_dir = wp_upload_dir();
-        return sprintf('%ssandbox/%s',
-                trailingslashit( $getdir ? $upload_dir['basedir'] : $upload_dir['baseurl']),
-                !empty($container) ? $container . '/' : '');
+        return CoderSandbox::instance()->drive($container,$getdir);
+        //$upload_dir = wp_upload_dir();
+        //return sprintf('%ssandbox/%s',
+        //        trailingslashit( $getdir ? $upload_dir['basedir'] : $upload_dir['baseurl']),
+        //        !empty($container) ? $container . '/' : '');
     }
     /**
      * @param array $data

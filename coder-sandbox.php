@@ -13,21 +13,21 @@ require_once sprintf('%s/lib/classes.php', CODER_SANDBOX_DIR);
 
 // Bootstrap plugin
 add_action('plugins_loaded', function () {
-    \CODERS\SandBox\CoderSandbox::instance(); }
+    \CODERS\Sandbox\CoderSandbox::instance(); }
 );
 
 add_action('init', function () {
     if (is_admin()) {
         require_once sprintf('%s/lib/admin.php', CODER_SANDBOX_DIR);
     } else {
-        \CODERS\SandBox\CoderSandbox::rewrite();
+        \CODERS\Sandbox\CoderSandbox::rewrite();
     }
 });
 
 add_action('template_redirect', function () {
     $endpoint = get_query_var('sandbox_app');
     if ($endpoint) {
-        $box = new \CODERS\SandBox\CoderBox($endpoint);
+        $box = new \CODERS\Sandbox\Box($endpoint);
         $box->run();
         exit;
     }
