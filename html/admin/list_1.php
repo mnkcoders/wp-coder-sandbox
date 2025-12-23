@@ -1,4 +1,5 @@
 <h1 class="wp-heading-inline"><?php print get_admin_page_title() ?></h1>
+<?php $this->show_log() ?>
 <table class="wp-list-table widefat fixed striped table-view-excerpt roles">
     <thead>
         <tr>

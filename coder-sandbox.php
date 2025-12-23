@@ -7,8 +7,8 @@
  * Text Domain: coder_sandbox
  */
 defined('ABSPATH') or exit;
-define('CODER_SANDBOX_DIR', plugin_dir_path(__FILE__));
-define('CODER_SANDBOX_URL', plugin_dir_url(__FILE__));
+define('CODER_SANDBOX_DIR', preg_replace( '/\\\\/','/',plugin_dir_path(__FILE__)));
+define('CODER_SANDBOX_URL', preg_replace( '/\\\\/','/',plugin_dir_url(__FILE__)));
 require_once sprintf('%s/lib/classes.php', CODER_SANDBOX_DIR);
 
 // Bootstrap plugin

@@ -56,6 +56,30 @@ class Content extends \CODERS\Sandbox\Box{
         parent::__construct($name, $endpoint);
     }
     /**
+     * @param string $name
+     * @return String
+     */
+    public function __get($name) {
+        $get = sprintf('get%s', ucfirst($name));
+        if(method_exists($this, $get)){
+            return $this->$get();
+        }
+        return parent::__get($name);
+    }
+    /**
+     * @return string
+     */
+    protected function getPath() {
+        return $this->local();
+    }
+    /**
+     * @return string
+     */
+    protected function getStatus() {
+        $path = $this->getPath();
+        return file_exists($path) ? 'ready' : 'created';
+    }
+    /**
      * @param \CODERS\Sandbox\Box $box
      * @return \CODERS\Sandbox\Admin\Content
      */
@@ -224,7 +248,7 @@ class Controller {
      * @param string $context main as default
      * @return \CODERS\Sandbox\Admin\View
      */
-    protected function layout( $context = 'main' ){
+    protected function view( $context = 'main' ){
         return View::create( strlen($context) ? $context : $this->action());
     }
 
@@ -365,11 +389,9 @@ class AdminController extends Controller{
      * @return bool
      */
     protected function mainAction( ){
-        
-        $this->layout()
-                //->setData($content)
-                ->view('list');
-        
+        $this->view('admin')
+                //->setContent($content)
+                ->show('list');
         return true;
     }
 }
@@ -383,7 +405,7 @@ class SandboxController extends Controller{
      * @return bool
      */
     protected function mainAction(): bool {
-        $this->layout()->setContent(Content::import($this->id))->view('box');
+        $this->view('sandbox')->setContent(Content::import($this->id))->show('box');
         return true;
     }
 }
@@ -397,9 +419,9 @@ class SettingsController extends Controller{
      * @return bool
      */
     protected function mainAction(): bool {
-        $this->layout()
+        $this->view()
                 //->setContent(new SettingsContent())
-                ->view('settings');
+                ->show('settings');
 
         return true;
     }
@@ -479,20 +501,23 @@ class View{
      * @return \CODERS\Sandbox\Admin\View
      */
     public static function create( $context = '' ){
-        return new View($context);
+        $class = sprintf('\CODERS\Sandbox\Admin\%sView', ucfirst($context));
+        return (class_exists($class) && is_subclass_of($class, self::class)) ?
+            new $class($context) :
+                new View($context);
     }
     /**
-     * @param \Object $data
+     * @param \CODERS\Sandbox\Admin\Content $data
      * @return \CODERS\Admin\View
      */
-    public function setData($data = null ){
+    public function setContent($data = null ){
         $this->_data = is_subclass_of($data, object) ? $data : null;
         return $this;
     }
     /**
-     * @return \Object
+     * @return \CODERS\Sandbox\Admin\Content
      */
-    public function data() {
+    public function content() {
         return $this->_data;
     }
     /**
@@ -508,7 +533,7 @@ class View{
      */
     private function path($view = '') {
         return !empty($view) ?
-            sprintf('%s/html/%s.php', preg_replace('/\\\\/', '/', CODER_SANDBOX_DIR), $view) : '';
+            sprintf('%shtml/admin/%s.php',  CODER_SANDBOX_DIR, $view) : '';
     }
 
     /**
@@ -539,13 +564,7 @@ class View{
                 $has = sprintf('has%s', ucfirst(substr($name, 4)));
                 return method_exists($this, $has) ? $this->$has(...$args) : false;
             case preg_match('/^show_/', $name):
-                $show = $this->path(sprintf('templates/%s',substr($name, 5)) );
-                if(file_exists($show)) {
-                    require $show;
-                    printf('<!-- %s -->',$name);
-                    return true;
-                }
-                return false;
+                return $this->show(sprintf('templates/%s',substr($name, 5)) );
         }
         return array_key_exists($name,$this->_attributes) ? $this->_attributes[$name] : '';
     }
@@ -573,10 +592,9 @@ class View{
      * @param string $name
      * @return bool Description
      */
-    public function view($name = ''){
+    public function show($name = ''){
         $view = $this->path( strlen($name ) ? $name : $this->context());
         if(!empty($view) && file_exists($view)){
-            $this->viewMessages();
             require $view;
             return true;
         }
@@ -588,11 +606,13 @@ class View{
      */
     public static function load($page = '') {
         if ($page === 'coder-sandbox') {
-            $script = sprintf('%shtml/content/script.js', CODER_SANDBOX_URL);
-            $script_path = sprintf('%shtml/content/script.js', CODER_SANDBOX_DIR);
+            $script = sprintf('%shtml/admin/content/script.js', CODER_SANDBOX_URL);
+            $script_path = sprintf('%shtml/admin/content/script.js', CODER_SANDBOX_DIR);
+            $css = sprintf('%shtml/admin/content/style.css', CODER_SANDBOX_URL);
+            $css_path = sprintf('%shtml/admin/content/style.css', CODER_SANDBOX_DIR);
+            wp_enqueue_style('sandbox-style', $css, [], filemtime($css_path));
             // Register and enqueue JS
             wp_enqueue_script('sandbox-admin-script', $script, ['jquery'], filemtime($script_path), true);
-
             // Optional: Pass variables to JS
             wp_localize_script('sandbox-admin-script', 'CoderSandboxApi', [
                 'url' => admin_url('admin-ajax.php'),
@@ -605,7 +625,26 @@ class View{
 /**
  * 
  */
-class SandboxView extends \CODERS\Sandbox\Admin\View{
+class AdminView extends View{
+    /**
+     * @param string $context
+     */
+    protected function __construct( $context = '') {
+        parent::__construct($context);
+    }
+    /**
+     * @return \CODERS\Sandbox\Admin\Content[]
+     */
+    protected function listBoxes() {
+        return Content::listBoxes();
+    }
+}
+
+
+/**
+ * 
+ */
+class SandboxView extends View{
 
 
 
