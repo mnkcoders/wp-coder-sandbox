@@ -113,6 +113,7 @@ class Box {
         'id' => '',
         'name' => '',
         'endpoint' => 'index.html',
+        'description' => '',
     );
     /**
      * @param String $name
